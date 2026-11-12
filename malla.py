@@ -1,44 +1,54 @@
-# Librerias necesarias
 import numpy as np
+from scipy.spatial import Delaunay
 
-# Funcion para generar la malla
-# nx es el numero de nodos en x, ny es el numero de nodos en y
 def generar_malla(Lx, Ly, nx=61, ny=61, orificios=None):
-
-    # La idea es generar una malla triangular P1 e identificar los nodos de frontera Dirichlet
+    
+    # Se genera una malla triangular P1 no estructurada
+    
+    # Se crea una nube base de puntos en el dominio rectangular
     x = np.linspace(0, Lx, nx)
     y = np.linspace(0, Ly, ny)
-    xx, yy = np.meshgrid(x, y) # arrays 2D de coordenadas de los nodos de la malla
-    coords = np.column_stack([xx.ravel(), yy.ravel()]) # Lo que se hace construir una lista de todos los nodos de la malla, donde cada fila es un punto (x, y).
+    xx, yy = np.meshgrid(x, y)
+    coords = np.column_stack([xx.ravel(), yy.ravel()])
 
-    elementos = []
-    for j in range(ny - 1):
-        for i in range(nx - 1):
-            n0 = j * nx + i 
-            n1 = n0 + 1
-            n2 = (j + 1) * nx + i
-            n3 = n2 + 1
-            # Se especifica la orientación antihoraria
-            elementos.append([n0, n1, n3]) # Se genera el primer triángulo de la celda
-            elementos.append([n0, n3, n2]) # Se genera el segundo triángulo de la celda
-    elementos = np.array(elementos)
+    dx = Lx / (nx - 1)
+    dy = Ly / (ny - 1)
+    h_prom = 0.5 * (dx + dy)
 
-    # Remover orificios internos (frontera Neumann)
     if orificios:
-        nodos_validos = np.ones(len(coords), dtype=bool)
         for (hx, hy, r) in orificios:
+            # Se eliminan puntos base que caen dentro o muy cerca del borde del círculo
             dist = np.hypot(coords[:, 0] - hx, coords[:, 1] - hy)
-            nodos_validos &= (dist >= r)
+            coords = coords[dist > r + 0.55 * h_prom]
 
-        mascara_elem = np.all(nodos_validos[elementos], axis=1)
-        elementos = elementos[mascara_elem]
+            # Se colocan nodos exactamente sobre la circunferencia de radio r
+            n_circ = max(24, int(np.ceil(2 * np.pi * r / (0.6 * h_prom))))
+            angulos = np.linspace(0, 2 * np.pi, n_circ, endpoint=False)
+            x_circ = hx + r * np.cos(angulos)
+            y_circ = hy + r * np.sin(angulos)
+            coords = np.vstack([coords, np.column_stack([x_circ, y_circ])])
 
-        # Reindexar los nodos activos
-        nodos_unicos, nuevos_indices = np.unique(elementos, return_inverse=True)
-        elementos = nuevos_indices.reshape(elementos.shape)
-        coords = coords[nodos_unicos]
+    # 2. Triangulación de Delaunay sobre la nube de puntos ajustada (suavisar perforaciones)
+    tri = Delaunay(coords)
+    elementos = tri.simplices
 
-    # Detectar bordes exteriores (Dirichlet)
+    # Se filtran los triángulos cuyo baricentro cae dentro de los orificios
+    if orificios:
+        centroides = np.mean(coords[elementos], axis=1)
+        mascara_valida = np.ones(len(elementos), dtype=bool)
+        for (hx, hy, r) in orificios:
+            dist_c = np.hypot(centroides[:, 0] - hx, centroides[:, 1] - hy)
+            mascara_valida &= (dist_c >= r - 1e-9)
+        elementos = elementos[mascara_valida]
+
+    # Se asegura la orientación antihoraria en todos los triángulos (detJ > 0)
+    for i, elem in enumerate(elementos):
+        p0, p1, p2 = coords[elem]
+        detJ = (p1[0] - p0[0]) * (p2[1] - p0[1]) - (p2[0] - p0[0]) * (p1[1] - p0[1])
+        if detJ < 0:
+            elementos[i] = [elem[0], elem[2], elem[1]]
+
+    # Se identifican nodos del contorno exterior (Dirichlet)
     tol = 1e-6
     nodos_dirichlet = np.where(
         (coords[:, 0] <= tol) | (coords[:, 0] >= Lx - tol) |
