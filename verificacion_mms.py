@@ -146,7 +146,7 @@ def ejecutar_estudio_mms():
     print("-" * 68)
     print(f"Orden de convergencia con ajuste log-log: p = {pendiente_global:.4f} (Teórico: 2.0000)")
 
-    # Gráfica de convergencia log-log (Ec. 27)
+    # Gráfica de convergencia log-log
     fig, ax = plt.subplots(figsize=(6.2, 4.8))
     ax.loglog(hs, errores, "o-", color="#1f77b4", linewidth=1.8, markersize=6, label=r"Error numérico $\|\theta_{\mathrm{manu}} - \theta_h\|_{L^2}$")
 
